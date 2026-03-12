@@ -1,9 +1,5 @@
-<<<<<<< HEAD
 # Assetto Corsa Telemetry Dashboard
 =======
-# assettodash
->>>>>>> dafaad39901525dad6d7961c5a6174710a44e516
-
 A cross-platform application built with Flutter that receives real-time telemetry data via UDP from **Assetto Corsa** running on a PC. Display live vehicle data such as engine RPM directly on your smartphone or tablet while racing.
 
 <div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;">
