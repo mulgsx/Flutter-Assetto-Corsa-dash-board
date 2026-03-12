@@ -5,7 +5,12 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(curl -s https://raw.githubusercontent.com/mulgsx/Flutter-GT7-dash-board/main/lib/main.dart)",
-      "Bash(flutter pub:*)"
+      "Bash(flutter pub:*)",
+      "Read(//c/Users/kouta/FlutterProjects/20260310assettodash/**)",
+      "Bash(find /c/Users/kouta/FlutterProjects/20260310assettodash/assettpdash/test -type f -name *.dart)",
+      "Bash(grep -E \"\\\\.\\(md|yaml|json\\)$\")",
+      "Bash(find /c/Users/kouta/FlutterProjects/20260310assettodash/assettpdash -name *.json -o -name CLAUDE.md)",
+      "Bash(gh api:*)"
     ]
   }
 }

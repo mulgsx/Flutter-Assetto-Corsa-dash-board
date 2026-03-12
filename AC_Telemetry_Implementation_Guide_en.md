@@ -1,226 +1,226 @@
-# Assetto Corsa テレメトリデータ取得実装ガイド
+# Assetto Corsa Telemetry Data Implementation Guide
 
-## 概要
+## Overview
 
-Assetto Corsaは組み込みUDPサーバーを搭載しており、外部アプリケーション（スマートフォンのダッシュボードアプリなど）からリアルタイムテレメトリデータを取得できます。このドキュメントは、Dartを使用したFlutterアプリケーションでの実装方法を説明します。
-
----
-
-## セットアップ要件
-
-### ハードウェア/環境
-- **Assetto Corsaが実行されるPC** （Windows/Mac/Linux対応）
-- **スマートフォン** （同じWi-Fiネットワーク上）
-- **トランスポート層**: UDP port **9996**
-
-### 事前確認
-- PCとスマートフォンが同じネットワーク上にあること
-- PCのローカルIPアドレス（例：`192.168.1.100`）を確認
+Assetto Corsa has a built-in UDP server that allows external applications (such as smartphone dashboard apps) to retrieve real-time telemetry data. This document explains how to implement this in a Flutter application using Dart.
 
 ---
 
-## 通信プロトコルの階層構造
+## Setup Requirements
 
-### **階層による役割の違い**
+### Hardware / Environment
+- **PC running Assetto Corsa** (Windows/Mac/Linux)
+- **Smartphone** (on the same Wi-Fi network)
+- **Transport layer**: UDP port **9996**
+
+### Prerequisites
+- PC and smartphone must be on the same network
+- Know the PC's local IP address (e.g., `192.168.1.100`)
+
+---
+
+## Communication Protocol Layer Structure
+
+### **Role of Each Layer**
 
 ```
-アプリケーション層
+Application Layer
 ┌─────────────────────────────────────────┐
-│ Assetto Corsa独自プロトコル             │
-│  - ハンドシェイク（接続確認）           │
-│  - セッション情報交換                   │
-│  - モード選択                           │
-│  - テレメトリデータ定義                 │
+│ Assetto Corsa proprietary protocol      │
+│  - Handshake (connection verification)  │
+│  - Session information exchange         │
+│  - Mode selection                       │
+│  - Telemetry data definitions           │
 └─────────────────────────────────────────┘
-          ↓ (UDPで送受信)
-トランスポート層
+          ↓ (sent/received via UDP)
+Transport Layer
 ┌─────────────────────────────────────────┐
 │ UDP                                     │
-│  - 接続確立なし                         │
-│  - 確認応答なし                         │
-│  - 低レイテンシー（120Hz対応）         │
-│  - 軽量（ゲームに最適）                 │
+│  - No connection establishment          │
+│  - No acknowledgment                   │
+│  - Low latency (supports 120Hz)         │
+│  - Lightweight (ideal for games)        │
 └─────────────────────────────────────────┘
           ↓
-ネットワーク層
+Network Layer
 ┌─────────────────────────────────────────┐
 │ IP (IPv4)                               │
-│  - ルーティング、アドレス管理           │
+│  - Routing, address management          │
 └─────────────────────────────────────────┘
 ```
 
-### **重要な区別**
+### **Key Distinction**
 
-| 層 | 技術 | 役割 | 実装元 |
+| Layer | Technology | Role | Implemented by |
 |---|---|---|---|
-| **トランスポート** | **UDP** | データを送受信する | OSが実装 |
-| **アプリケーション** | **ハンドシェイク・プロトコル** | 接続確認・モード選択 | Assetto Corsaが実装 |
+| **Transport** | **UDP** | Sends and receives data | OS |
+| **Application** | **Handshake protocol** | Connection verification, mode selection | Assetto Corsa |
 
-### **通信フロー**
+### **Communication Flow**
 
 ```
-[1] クライアント → サーバー: ハンドシェイク送信（Connect）
-    ↓ (UDP で送信)
-[2] サーバー → クライアント: ハンドシェイク応答 + セッション情報
-    ↓ (UDP で受信)
-[3] クライアント → サーバー: ハンドシェイク送信（モード選択）
-    ↓ (UDP で送信)
-[4] サーバー → クライアント: RTCarInfo または RTLap（連続送信 120Hz）
-    ↓ (UDP で連続受信)
+[1] Client → Server: Send handshake (Connect)
+    ↓ (sent via UDP)
+[2] Server → Client: Handshake response + session info
+    ↓ (received via UDP)
+[3] Client → Server: Send handshake (mode selection)
+    ↓ (sent via UDP)
+[4] Server → Client: RTCarInfo or RTLap (continuous at 120Hz)
+    ↓ (continuously received via UDP)
 ```
 
-### **なぜこの設計？**
+### **Why This Design?**
 
-**UDPを選んだ理由:**
-- ✅ 低レイテンシー（TCPより高速）
-- ✅ 軽量（ゲーム向け）
-- ✅ 120Hzの高頻度送信に対応
-- ❌ ただし接続確認がない
+**Why UDP:**
+- ✅ Low latency (faster than TCP)
+- ✅ Lightweight (game-friendly)
+- ✅ Supports high-frequency sending at 120Hz
+- ❌ However, no connection confirmation
 
-**ハンドシェイク（アプリケーション層）で補った:**
-- 「本当に接続されているか」をアプリケーション層で確認
-- セッション情報（ドライバー名、車名等）を交換
-- テレメトリモードを選択（カーテレメトリ or ラップタイム）
+**Supplemented by handshake (application layer):**
+- Verifies "is the connection actually alive" at the application layer
+- Exchanges session info (driver name, car name, etc.)
+- Selects telemetry mode (car telemetry or lap time)
 
 ---
 
-## プロトコル仕様
+## Protocol Specification
 
-### アプリケーション層パケット仕様
+### Application Layer Packet Specification
 
-このセクションで説明するパケット構造は、**Assetto Corsaが独自に定義したアプリケーション層プロトコル**です。これらのデータはすべて**UDPで送受信**されます。
+The packet structures described in this section are the **application layer protocol defined by Assetto Corsa**. All of this data is **sent and received via UDP**.
 
-#### 1. Handshaker（12バイト）
+#### 1. Handshaker (12 bytes)
 
-**[アプリケーション層]** クライアントがサーバーに送信。初期化と通信モード選択に使用。
+**[Application Layer]** Sent by the client to the server. Used for initialization and communication mode selection.
 
 ```
-Offset  Type    Size  説明
-------  ----    ----  ----
-0       uint32  4     identifier (デバイスID, 通常1)
-4       uint32  4     version (プロトコルバージョン, 通常1)
+Offset  Type    Size  Description
+------  ----    ----  -----------
+0       uint32  4     identifier (device ID, usually 1)
+4       uint32  4     version (protocol version, usually 1)
 8       uint32  4     operationId (0=Connect, 1=CarInfo, 2=LapInfo, 3=Disconnect)
 ```
 
-**このパケットはUDP（トランスポート層）で送信されます**
+**This packet is sent via UDP (transport layer)**
 
-#### 2. HandshakerResponse（408バイト固定）
+#### 2. HandshakerResponse (408 bytes fixed)
 
-**[アプリケーション層]** サーバーからの応答。セッション情報を含む。
+**[Application Layer]** Response from the server. Contains session information.
 
 ```
-Offset  Type               Size  説明
-------  ----               ----  ----
+Offset  Type               Size  Description
+------  ----               ----  -----------
 0       string[50]         100   carName (Unicode UTF-16LE)
 100     string[50]         100   driverName (Unicode UTF-16LE)
-200     uint32             4     identifier (ステータスコード, 4242)
-204     uint32             4     version (サーバーバージョン)
+200     uint32             4     identifier (status code, 4242)
+204     uint32             4     version (server version)
 208     string[50]         100   trackName (Unicode UTF-16LE)
 308     string[50]         100   trackConfig (Unicode UTF-16LE)
 ```
 
-**注意**: 
-- 文字列はUTF-16LE（Unicode）で100バイト（50文字×2バイト）
-- このパケットもUDP（トランスポート層）で受信されます
+**Notes**:
+- Strings are UTF-16LE (Unicode), 100 bytes (50 characters × 2 bytes)
+- This packet is also received via UDP (transport layer)
 
-#### 3. RTCarInfo（328バイト固定）
+#### 3. RTCarInfo (328 bytes fixed)
 
-**[アプリケーション層]**
+**[Application Layer]**
 
-車両テレメトリデータ。CarInfoモード時に連続送信。
+Vehicle telemetry data. Sent continuously in CarInfo mode.
 
 ```
-Offset  Type              Size  説明
-------  ----              ----  ----
+Offset  Type              Size  Description
+------  ----              ----  -----------
 0       string[2]         4     identifier ("AC" = ASCII)
-4       uint32            4     size (構造体サイズ = 328)
-8       float32           4     speed_Kmh (速度 km/h)
-12      float32           4     speed_Mph (速度 mph)
-16      float32           4     speed_Ms (速度 m/s)
-20      uint8             1     isAbsEnabled (ABS有効)
-21      uint8             1     isAbsInAction (ABS作動)
-22      uint8             1     isTcInAction (トラクションコントロール作動)
-23      uint8             1     isTcEnabled (トラクションコントロール有効)
-24      uint8             1     isInPit (ピット内フラグ)
-25      uint8             1     isEngineLimiterOn (エンジンリミッター)
-28      float32           4     accG_vertical (垂直G)
-32      float32           4     accG_horizontal (横G)
-36      float32           4     accG_frontal (前後G)
-40      uint32            4     lapTime (現在のラップタイム ms)
-44      uint32            4     lastLap (前ラップタイム ms)
-48      uint32            4     bestLap (ベストラップ ms)
-52      uint32            4     lapCount (ラップ数)
-56      float32           4     gas (スロットル 0-1)
-60      float32           4     brake (ブレーキ 0-1)
-64      float32           4     clutch (クラッチ 0-1)
-68      float32           4     engineRPM (エンジン回転数)
-72      float32           4     steer (ハンドル角 -1 to 1)
-76      uint32            4     gear (ギア 0=R, 1=N, 2+=前進)
-80      float32           4     cgHeight (重心高さ)
-84      float32[4]        16    wheelAngularSpeed (ホイール回転速度 各輪)
-100     float32[4]        16    slipAngle (スリップ角)
-116     float32[4]        16    slipAngle_ContactPatch (接地面スリップ角)
-132     float32[4]        16    slipRatio (スリップレート)
-148     float32[4]        16    tyreSlip (タイヤスリップ)
-164     float32[4]        16    ndSlip (ノーマライズドスリップ)
-180     float32[4]        16    load (タイヤ荷重)
-196     float32[4]        16    Dy (横力)
-212     float32[4]        16    Mz (自動復帰モーメント)
-228     float32[4]        16    tyreDirtyLevel (タイヤダーティレベル)
-244     float32[4]        16    camberRAD (キャンバー角 ラジアン)
-260     float32[4]        16    tyreRadius (タイヤ半径)
-276     float32[4]        16    tyreLoadedRadius (荷重時タイヤ半径)
-292     float32[4]        16    suspensionHeight (サスペンション高)
-308     float32           4     carPositionNormalized (トラック上の正規化位置)
-312     float32           4     carSlope (車体傾斜角)
-316     float32[3]        12    carCoordinates (3D座標)
+4       uint32            4     size (struct size = 328)
+8       float32           4     speed_Kmh (speed in km/h)
+12      float32           4     speed_Mph (speed in mph)
+16      float32           4     speed_Ms (speed in m/s)
+20      uint8             1     isAbsEnabled (ABS enabled)
+21      uint8             1     isAbsInAction (ABS active)
+22      uint8             1     isTcInAction (traction control active)
+23      uint8             1     isTcEnabled (traction control enabled)
+24      uint8             1     isInPit (in pit flag)
+25      uint8             1     isEngineLimiterOn (engine limiter)
+28      float32           4     accG_vertical (vertical G-force)
+32      float32           4     accG_horizontal (lateral G-force)
+36      float32           4     accG_frontal (longitudinal G-force)
+40      uint32            4     lapTime (current lap time in ms)
+44      uint32            4     lastLap (previous lap time in ms)
+48      uint32            4     bestLap (best lap time in ms)
+52      uint32            4     lapCount (number of laps)
+56      float32           4     gas (throttle 0-1)
+60      float32           4     brake (brake 0-1)
+64      float32           4     clutch (clutch 0-1)
+68      float32           4     engineRPM (engine RPM)
+72      float32           4     steer (steering angle -1 to 1)
+76      uint32            4     gear (gear: 0=R, 1=N, 2+=forward)
+80      float32           4     cgHeight (center of gravity height)
+84      float32[4]        16    wheelAngularSpeed (wheel rotation speed, per wheel)
+100     float32[4]        16    slipAngle (slip angle)
+116     float32[4]        16    slipAngle_ContactPatch (contact patch slip angle)
+132     float32[4]        16    slipRatio (slip ratio)
+148     float32[4]        16    tyreSlip (tyre slip)
+164     float32[4]        16    ndSlip (normalized slip)
+180     float32[4]        16    load (tyre load)
+196     float32[4]        16    Dy (lateral force)
+212     float32[4]        16    Mz (self-aligning moment)
+228     float32[4]        16    tyreDirtyLevel (tyre dirt level)
+244     float32[4]        16    camberRAD (camber angle in radians)
+260     float32[4]        16    tyreRadius (tyre radius)
+276     float32[4]        16    tyreLoadedRadius (loaded tyre radius)
+292     float32[4]        16    suspensionHeight (suspension height)
+308     float32           4     carPositionNormalized (normalized position on track)
+312     float32           4     carSlope (vehicle pitch angle)
+316     float32[3]        12    carCoordinates (3D coordinates)
 ```
 
-#### 4. RTLap（212バイト以上）
+#### 4. RTLap (212+ bytes)
 
-**[アプリケーション層]** ラップタイムデータ。LapInfoモード時に各ラップ完了時に送信。
+**[Application Layer]** Lap time data. Sent at each lap completion in LapInfo mode.
 
 ```
-Offset  Type        Size  説明
-------  ----        ----  ----
-0       uint32      4     carIdentifierNumber (車両識別番号)
-4       uint32      4     lap (ラップ番号)
+Offset  Type        Size  Description
+------  ----        ----  -----------
+0       uint32      4     carIdentifierNumber (vehicle identifier)
+4       uint32      4     lap (lap number)
 8       string[50]  100   driverName (Unicode UTF-16LE)
 108     string[50]  100   carName (Unicode UTF-16LE)
-208     uint32      4     time (ラップタイム ms)
+208     uint32      4     time (lap time in ms)
 ```
 
-**注意**: このパケットもUDP（トランスポート層）で受信されます
+**Note**: This packet is also received via UDP (transport layer)
 
 ---
 
-## Dart/Flutter実装
+## Dart/Flutter Implementation
 
-### 1. データ構造定義
+### 1. Data Structure Definitions
 
 ```dart
 import 'dart:typed_data';
 
-/// Assetto Corsaテレメトリパーサー
+/// Assetto Corsa telemetry parser
 class ACConverter {
-  /// ハンドシェイク構造体
+  /// Handshake struct
   static class Handshaker {
     static const int OPERATION_CONNECT = 0;
     static const int OPERATION_CAR_INFO = 1;
     static const int OPERATION_LAP_INFO = 2;
     static const int OPERATION_DISCONNECT = 3;
-    
+
     final int identifier;
     final int version;
     final int operationId;
-    
+
     Handshaker(
       this.operationId, {
       this.identifier = 1,
       this.version = 1,
     });
-    
-    /// 構造体をバイト列に変換
+
+    /// Convert struct to byte array
     Uint8List toBytes() {
       final buffer = BytesBuilder();
       _writeUint32(buffer, identifier);
@@ -229,8 +229,8 @@ class ACConverter {
       return buffer.toBytes();
     }
   }
-  
-  /// ハンドシェイク応答
+
+  /// Handshake response
   static class HandshakerResponse {
     String carName;
     String driverName;
@@ -238,7 +238,7 @@ class ACConverter {
     int version;
     String trackName;
     String trackConfig;
-    
+
     HandshakerResponse({
       this.carName = '',
       this.driverName = '',
@@ -247,13 +247,13 @@ class ACConverter {
       this.trackName = '',
       this.trackConfig = '',
     });
-    
-    /// バイト列から構造体を生成
+
+    /// Create struct from byte array
     factory HandshakerResponse.fromBytes(Uint8List bytes) {
       if (bytes.length < 408) {
         throw Exception('Invalid handshaker response packet size');
       }
-      
+
       return HandshakerResponse(
         carName: _readUnicodeString(bytes, 0, 50),
         driverName: _readUnicodeString(bytes, 100, 50),
@@ -263,14 +263,14 @@ class ACConverter {
         trackConfig: _readUnicodeString(bytes, 308, 50),
       );
     }
-    
+
     @override
     String toString() => 'HandshakerResponse('
         'car: $carName, driver: $driverName, '
         'track: $trackName($trackConfig))';
   }
-  
-  /// 車両テレメトリデータ
+
+  /// Vehicle telemetry data
   static class RTCarInfo {
     String identifier;
     int size;
@@ -314,7 +314,7 @@ class ACConverter {
     double carPositionNormalized;
     double carSlope;
     List<double> carCoordinates; // [3]
-    
+
     RTCarInfo({
       this.identifier = '',
       this.size = 0,
@@ -373,13 +373,13 @@ class ACConverter {
           tyreLoadedRadius = tyreLoadedRadius ?? [0, 0, 0, 0],
           suspensionHeight = suspensionHeight ?? [0, 0, 0, 0],
           carCoordinates = carCoordinates ?? [0, 0, 0];
-    
-    /// バイト列から構造体を生成
+
+    /// Create struct from byte array
     factory RTCarInfo.fromBytes(Uint8List bytes) {
       if (bytes.length < 328) {
         throw Exception('Invalid RTCarInfo packet size: ${bytes.length}');
       }
-      
+
       return RTCarInfo(
         identifier: _readString(bytes, 0, 2),
         size: _readUint32(bytes, 4),
@@ -425,7 +425,7 @@ class ACConverter {
         carCoordinates: _readFloat32Array(bytes, 316, 3),
       );
     }
-    
+
     @override
     String toString() => 'RTCarInfo('
         'speed: ${speedKmh.toStringAsFixed(1)}km/h, '
@@ -433,15 +433,15 @@ class ACConverter {
         'gear: $gear, '
         'lapTime: ${(lapTime / 1000).toStringAsFixed(2)}s)';
   }
-  
-  /// ラップタイムデータ
+
+  /// Lap time data
   static class RTLap {
     int carIdentifierNumber;
     int lap;
     String driverName;
     String carName;
     int time;
-    
+
     RTLap({
       this.carIdentifierNumber = 0,
       this.lap = 0,
@@ -449,13 +449,13 @@ class ACConverter {
       this.carName = '',
       this.time = 0,
     });
-    
-    /// バイト列から構造体を生成
+
+    /// Create struct from byte array
     factory RTLap.fromBytes(Uint8List bytes) {
       if (bytes.length < 212) {
         throw Exception('Invalid RTLap packet size: ${bytes.length}');
       }
-      
+
       return RTLap(
         carIdentifierNumber: _readUint32(bytes, 0),
         lap: _readUint32(bytes, 4),
@@ -464,7 +464,7 @@ class ACConverter {
         time: _readUint32(bytes, 208),
       );
     }
-    
+
     @override
     String toString() => 'RTLap('
         'lap: $lap, '
@@ -472,10 +472,10 @@ class ACConverter {
         'car: $carName, '
         'time: ${(time / 1000).toStringAsFixed(2)}s)';
   }
-  
-  // ==================== ヘルパー関数 ====================
-  
-  /// UTF-16LE文字列を読み込む
+
+  // ==================== Helper Functions ====================
+
+  /// Read UTF-16LE string
   static String _readUnicodeString(Uint8List bytes, int offset, int maxLen) {
     final codeUnits = <int>[];
     for (int i = 0; i < maxLen * 2; i += 2) {
@@ -488,8 +488,8 @@ class ACConverter {
     }
     return String.fromCharCodes(codeUnits);
   }
-  
-  /// ASCII文字列を読み込む
+
+  /// Read ASCII string
   static String _readString(Uint8List bytes, int offset, int maxLen) {
     final codeUnits = <int>[];
     for (int i = 0; i < maxLen; i++) {
@@ -500,8 +500,8 @@ class ACConverter {
     }
     return String.fromCharCodes(codeUnits);
   }
-  
-  /// uint32を読み込む (Little Endian)
+
+  /// Read uint32 (Little Endian)
   static int _readUint32(Uint8List bytes, int offset) {
     if (offset + 4 > bytes.length) return 0;
     return bytes[offset] |
@@ -509,21 +509,21 @@ class ACConverter {
         (bytes[offset + 2] << 16) |
         (bytes[offset + 3] << 24);
   }
-  
-  /// float32を読み込む (Little Endian)
+
+  /// Read float32 (Little Endian)
   static double _readFloat32(Uint8List bytes, int offset) {
     if (offset + 4 > bytes.length) return 0;
     final data = ByteData.view(bytes.buffer, offset, 4);
     return data.getFloat32(0, Endian.little);
   }
-  
-  /// bool値を読み込む
+
+  /// Read bool value
   static bool _readBool(Uint8List bytes, int offset) {
     if (offset >= bytes.length) return false;
     return bytes[offset] != 0;
   }
-  
-  /// float32配列を読み込む
+
+  /// Read float32 array
   static List<double> _readFloat32Array(Uint8List bytes, int offset, int count) {
     final result = <double>[];
     for (int i = 0; i < count; i++) {
@@ -531,8 +531,8 @@ class ACConverter {
     }
     return result;
   }
-  
-  /// uint32を書き込む (Little Endian)
+
+  /// Write uint32 (Little Endian)
   static void _writeUint32(BytesBuilder buffer, int value) {
     buffer.addByte(value & 0xFF);
     buffer.addByte((value >> 8) & 0xFF);
@@ -542,26 +542,26 @@ class ACConverter {
 }
 ```
 
-### 2. UDP接続クラス
+### 2. UDP Connection Class
 
 ```dart
 import 'dart:io';
 import 'dart:typed_data';
 
-/// Assetto CorsaのUDPクライアント
+/// Assetto Corsa UDP client
 class ACUdpClient {
   static const int AC_PORT = 9996;
-  
+
   final String ipAddress;
   final Function(HandshakerResponse) onSessionInfo;
   final Function(RTCarInfo) onCarInfoUpdate;
   final Function(RTLap) onLapUpdate;
   final Function(String) onError;
-  
+
   late RawDatagramSocket _socket;
   bool _isConnected = false;
   bool _handshakeCompleted = false;
-  
+
   ACUdpClient({
     required this.ipAddress,
     required this.onSessionInfo,
@@ -569,35 +569,35 @@ class ACUdpClient {
     required this.onLapUpdate,
     required this.onError,
   });
-  
+
   bool get isConnected => _isConnected;
-  
-  /// サーバーに接続
+
+  /// Connect to server
   Future<void> connect() async {
     try {
-      // ソケット作成
+      // Create socket
       _socket = await RawDatagramSocket.bind(
         InternetAddress.anyIPv4,
         AC_PORT,
       );
-      
-      // リッスン開始
+
+      // Start listening
       _socket.listen((event) {
         if (event == RawSocketEvent.read) {
           _handleData();
         }
       });
-      
-      // ハンドシェイク送信（Connect）
+
+      // Send handshake (Connect)
       _sendHandshake(ACConverter.Handshaker.OPERATION_CONNECT);
       _isConnected = true;
     } catch (e) {
-      onError('接続エラー: $e');
+      onError('Connection error: $e');
       _isConnected = false;
     }
   }
-  
-  /// 切断
+
+  /// Disconnect
   void disconnect() {
     if (_isConnected) {
       _sendHandshake(ACConverter.Handshaker.OPERATION_DISCONNECT);
@@ -606,50 +606,50 @@ class ACUdpClient {
       _handshakeCompleted = false;
     }
   }
-  
-  /// テレメトリ購読開始
+
+  /// Start subscribing to car telemetry
   void subscribeCarInfo() {
     _sendHandshake(ACConverter.Handshaker.OPERATION_CAR_INFO);
   }
-  
-  /// ラップタイム購読開始
+
+  /// Start subscribing to lap info
   void subscribeLapInfo() {
     _sendHandshake(ACConverter.Handshaker.OPERATION_LAP_INFO);
   }
-  
-  /// ハンドシェイク送信
+
+  /// Send handshake
   void _sendHandshake(int operationId) {
     try {
       final handshaker = ACConverter.Handshaker(operationId);
       final bytes = handshaker.toBytes();
       _socket.send(bytes, InternetAddress(ipAddress), AC_PORT);
     } catch (e) {
-      onError('ハンドシェイク送信エラー: $e');
+      onError('Handshake send error: $e');
     }
   }
-  
-  /// データ受信処理
+
+  /// Handle received data
   void _handleData() {
     try {
       final datagram = _socket.receive();
       if (datagram == null) return;
-      
+
       final bytes = datagram.data;
-      
+
       if (!_handshakeCompleted) {
-        // ハンドシェイク応答の処理
+        // Handle handshake response
         try {
           final response = ACConverter.HandshakerResponse.fromBytes(bytes);
           onSessionInfo(response);
           _handshakeCompleted = true;
-          
-          // テレメトリ購読開始
+
+          // Start telemetry subscription
           subscribeCarInfo();
         } catch (e) {
-          onError('ハンドシェイク応答パースエラー: $e');
+          onError('Handshake response parse error: $e');
         }
       } else {
-        // テレメトリデータの処理
+        // Handle telemetry data
         try {
           if (bytes.length == 328) {
             // RTCarInfo
@@ -661,17 +661,17 @@ class ACUdpClient {
             onLapUpdate(lapInfo);
           }
         } catch (e) {
-          onError('テレメトリパースエラー: $e');
+          onError('Telemetry parse error: $e');
         }
       }
     } catch (e) {
-      onError('データ受信エラー: $e');
+      onError('Data receive error: $e');
     }
   }
 }
 ```
 
-### 3. 使用例
+### 3. Usage Example
 
 ```dart
 import 'package:flutter/material.dart';
@@ -682,42 +682,42 @@ void main() {
 
 class MyApp extends StatefulWidget {
   const MyApp({Key? key}) : super(key: key);
-  
+
   @override
   State<MyApp> createState() => _MyAppState();
 }
 
 class _MyAppState extends State<MyApp> {
   late ACUdpClient _acClient;
-  String _ipAddress = '192.168.1.100'; // デフォルトIP
-  String _sessionInfo = '接続待機中...';
-  String _telemetry = 'テレメトリ受信待機中...';
-  
+  String _ipAddress = '192.168.1.100'; // Default IP
+  String _sessionInfo = 'Waiting for connection...';
+  String _telemetry = 'Waiting for telemetry...';
+
   @override
   void initState() {
     super.initState();
     _initializeClient();
   }
-  
+
   void _initializeClient() {
     _acClient = ACUdpClient(
       ipAddress: _ipAddress,
       onSessionInfo: (response) {
         setState(() {
-          _sessionInfo = 'ドライバー: ${response.driverName}\n'
-              '車: ${response.carName}\n'
-              'トラック: ${response.trackName}(${response.trackConfig})';
+          _sessionInfo = 'Driver: ${response.driverName}\n'
+              'Car: ${response.carName}\n'
+              'Track: ${response.trackName}(${response.trackConfig})';
         });
       },
       onCarInfoUpdate: (carInfo) {
         setState(() {
-          _telemetry = 'テレメトリ:\n'
-              '速度: ${carInfo.speedKmh.toStringAsFixed(1)}km/h\n'
+          _telemetry = 'Telemetry:\n'
+              'Speed: ${carInfo.speedKmh.toStringAsFixed(1)}km/h\n'
               'RPM: ${carInfo.engineRPM.toStringAsFixed(0)}\n'
-              'ギア: ${carInfo.gear}\n'
-              'ラップ: ${(carInfo.lapTime / 1000).toStringAsFixed(2)}s\n'
-              'スロットル: ${(carInfo.gas * 100).toStringAsFixed(1)}%\n'
-              'ブレーキ: ${(carInfo.brake * 100).toStringAsFixed(1)}%';
+              'Gear: ${carInfo.gear}\n'
+              'Lap: ${(carInfo.lapTime / 1000).toStringAsFixed(2)}s\n'
+              'Throttle: ${(carInfo.gas * 100).toStringAsFixed(1)}%\n'
+              'Brake: ${(carInfo.brake * 100).toStringAsFixed(1)}%';
         });
       },
       onLapUpdate: (lapInfo) {
@@ -727,18 +727,18 @@ class _MyAppState extends State<MyApp> {
       },
       onError: (error) {
         setState(() {
-          _sessionInfo = 'エラー: $error';
+          _sessionInfo = 'Error: $error';
         });
       },
     );
   }
-  
+
   @override
   void dispose() {
     _acClient.disconnect();
     super.dispose();
   }
-  
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -750,19 +750,19 @@ class _MyAppState extends State<MyApp> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // IP入力
+              // IP input
               TextField(
                 decoration: const InputDecoration(
-                  labelText: 'PCのIPアドレス',
-                  hintText: '例: 192.168.1.100',
+                  labelText: 'PC IP Address',
+                  hintText: 'e.g. 192.168.1.100',
                 ),
                 onChanged: (value) {
                   _ipAddress = value;
                 },
               ),
               const SizedBox(height: 16),
-              
-              // 接続ボタン
+
+              // Connect button
               ElevatedButton(
                 onPressed: _acClient.isConnected
                     ? () {
@@ -774,11 +774,11 @@ class _MyAppState extends State<MyApp> {
                         await _acClient.connect();
                         setState(() {});
                       },
-                child: Text(_acClient.isConnected ? '切断' : '接続'),
+                child: Text(_acClient.isConnected ? 'Disconnect' : 'Connect'),
               ),
               const SizedBox(height: 16),
-              
-              // セッション情報
+
+              // Session info
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -788,8 +788,8 @@ class _MyAppState extends State<MyApp> {
                 child: Text(_sessionInfo),
               ),
               const SizedBox(height: 16),
-              
-              // テレメトリ表示
+
+              // Telemetry display
               Expanded(
                 child: Container(
                   padding: const EdgeInsets.all(12),
@@ -811,140 +811,134 @@ class _MyAppState extends State<MyApp> {
 
 ---
 
-## 実装上での層の関係
+## Layer Relationships in Implementation
 
-### **開発者が意識すべき階層**
+### **Layers the Developer Should Be Aware Of**
 
-Flutterアプリ開発時に、何をしているのかを理解することが重要です：
+When developing a Flutter app, it is important to understand what each part does:
 
 ```
-【アプリケーション層】← 開発者が実装する部分
+[Application Layer] ← Part implemented by the developer
 ┌─────────────────────────────────────────┐
-│ 1. Handshaker.toBytes()                 │ ← バイト列へ変換
-│ 2. Handshaker データをパース            │ ← 受信データを解析
-│ 3. RTCarInfo.fromBytes()                │ ← バイト列をモデルに
-│ 4. ビジネスロジック（スピードメータ等）│ ← UIで表示
+│ 1. Handshaker.toBytes()                 │ ← Convert to byte array
+│ 2. Parse Handshaker data               │ ← Analyze received data
+│ 3. RTCarInfo.fromBytes()                │ ← Byte array to model
+│ 4. Business logic (speedometer, etc.)  │ ← Display in UI
 └─────────────────────────────────────────┘
           ↓ _socket.send() / .receive()
-【トランスポート層】← OSが自動的に処理
+[Transport Layer] ← Handled automatically by the OS
 ┌─────────────────────────────────────────┐
-│ 1. UDPでパケット送信                    │
-│ 2. ネットワークを通じて伝送             │
-│ 3. UDPでパケット受信                    │
+│ 1. Send packets via UDP                 │
+│ 2. Transmit over network               │
+│ 3. Receive packets via UDP              │
 └─────────────────────────────────────────┘
 ```
 
-### **実装のポイント**
+### **Implementation Key Points**
 
 ```dart
-// ✅ これはアプリケーション層の処理
+// ✅ This is application layer processing
 final handshaker = Handshaker(OPERATION_CONNECT);
-final bytes = handshaker.toBytes();  // バイト列に変換
+final bytes = handshaker.toBytes();  // Convert to byte array
 
-// ✅ これはトランスポート層（UDP）で処理される
+// ✅ This is handled by the transport layer (UDP)
 _socket.send(bytes, InternetAddress(ipAddress), AC_PORT);
 //    ↓
-// OSが自動的にUDPで送信
+// OS automatically sends via UDP
 
-// ✅ これはトランスポート層で受信
-final datagram = _socket.receive();  // UDPが自動処理
+// ✅ This is received by the transport layer
+final datagram = _socket.receive();  // UDP handles automatically
 
-// ✅ これはアプリケーション層で処理
+// ✅ This is processed by the application layer
 final response = HandshakerResponse.fromBytes(datagram.data);
 ```
 
-### **トラブルシューティングのポイント**
+### **Troubleshooting by Layer**
 
-| 問題 | 原因が多い層 | 確認方法 |
-|------|---|---|
-| **接続できない** | トランスポート層（UDP） | ファイアウォール、ポート、ネットワーク |
-| **パースエラー** | アプリケーション層 | オフセット、バイト順序、文字エンコード |
-| **データが来ない** | 両層 | まずネットワーク確認、次にハンドシェイク確認 |
-| **文字化け** | アプリケーション層 | UTF-16LE デコーディング確認 |
+| Problem | Most likely layer | How to check |
+|---------|---|---|
+| **Cannot connect** | Transport layer (UDP) | Firewall, port, network |
+| **Parse error** | Application layer | Offset, byte order, character encoding |
+| **No data arriving** | Both layers | Check network first, then handshake |
+| **Garbled characters** | Application layer | Verify UTF-16LE decoding |
 
 ---
 
-## トラブルシューティング
+## Troubleshooting
 
-### 接続できない
+### Cannot Connect
 
-1. **PCとスマートフォンが同じネットワーク上か確認**
-   - Wi-Fi設定を確認
-   - ファイアウォール設定確認
+1. **Verify PC and smartphone are on the same network**
+   - Check Wi-Fi settings
+   - Check firewall settings
 
-2. **正しいIPアドレスを使用しているか**
+2. **Are you using the correct IP address?**
    ```bash
-   # Windows PC上で確認
+   # Check on Windows PC
    ipconfig
    ```
 
-3. **ポート9996がブロックされていないか**
+3. **Is port 9996 blocked?**
    ```bash
-   # Windows: ポート確認
+   # Windows: check port
    netstat -an | findstr 9996
    ```
 
-### ハンドシェイク応答が来ない
+### No Handshake Response
 
-- Assetto Corsaが起動しているか確認
-- ゲーム内設定でリモートテレメトリが有効か確認
+- Verify Assetto Corsa is running
+- Verify remote telemetry is enabled in game settings
 
-### データが受信できない
+### Cannot Receive Data
 
-- パケットサイズを確認（RTCarInfo = 328バイト）
-- エンディアン（Little Endian）が正しいか確認
-- オフセット計算が正しいか確認
+- Check packet size (RTCarInfo = 328 bytes)
+- Verify endianness (Little Endian) is correct
+- Verify offset calculations are correct
 
-### 文字列が文字化けする
+### Garbled Strings
 
-- Unicode (UTF-16LE) デコーディングが正しいか確認
-- 文字列長の計算（50文字 = 100バイト）を確認
-
----
-
-## 参考リソース
-
-- [AC-UDP-Connection (C# 実装)](https://github.com/Egocentrix/AC-UDP-Connection)
+- Verify Unicode (UTF-16LE) decoding is correct
+- Verify string length calculation (50 chars = 100 bytes)
 
 
 ---
 
-## まとめ
+## Summary
 
-このガイドに従うことで、Flutterアプリケーションから確実にAssetto Corsaのテレメトリデータを取得できます。
+Following this guide, you can reliably retrieve telemetry data from Assetto Corsa in a Flutter application.
 
-### **層による役割の整理**
+### **Layer Roles Summary**
 
-| 層 | 技術 | 実装元 | 役割 |
+| Layer | Technology | Implemented by | Role |
 |---|---|---|---|
-| **アプリケーション層** | Assetto Corsaハンドシェイク・プロトコル | 開発者が実装 | 接続確認、セッション情報、モード選択 |
-| **トランスポート層** | UDP | OSが実装 | データをパケットで送受信 |
+| **Application Layer** | Assetto Corsa handshake protocol | Developer | Connection verification, session info, mode selection |
+| **Transport Layer** | UDP | OS | Send and receive data as packets |
 
-### **重要ポイント**
+### **Key Points**
 
-**トランスポート層（UDP）:**
-- ポート番号: **9996**
-- 接続確立なし（OSレベル）
-- 低レイテンシー、軽量
+**Transport Layer (UDP):**
+- Port number: **9996**
+- No connection establishment (OS level)
+- Low latency, lightweight
 
-**アプリケーション層（Assetto Corsa独自プロトコル）:**
-- ハンドシェイク: **Connect → Response → Mode Selection**
-- パケット仕様
-  - Handshaker: 12バイト
-  - HandshakerResponse: 408バイト
-  - RTCarInfo: 328バイト（テレメトリ）
-  - RTLap: 212バイト以上（ラップタイム）
-- 文字列: **UTF-16LE (Unicode)**
-- 数値: **Little Endian**
+**Application Layer (Assetto Corsa proprietary protocol):**
+- Handshake: **Connect → Response → Mode Selection**
+- Packet specifications:
+  - Handshaker: 12 bytes
+  - HandshakerResponse: 408 bytes
+  - RTCarInfo: 328 bytes (telemetry)
+  - RTLap: 212+ bytes (lap time)
+- Strings: **UTF-16LE (Unicode)**
+- Numbers: **Little Endian**
 
-### **開発時の意識**
+### **Mindset During Development**
 
 ```dart
-// UDPは「物質的な送受信手段」
-_socket.send(bytes, ip, 9996);  // ← OSが処理
+// UDP is the "physical means of sending/receiving"
+_socket.send(bytes, ip, 9996);  // ← OS handles this
 
-// ハンドシェイクは「通信ルール」
-Handshaker(OPERATION_CONNECT)   // ← 開発者が実装
+// Handshake is the "communication rules"
+Handshaker(OPERATION_CONNECT)   // ← Developer implements this
 ```
 
-Assetto Corsaは**UDPの速度**と**ハンドシェイク信頼性**の両立を実現しています。
+Assetto Corsa achieves both **UDP speed** and **handshake reliability**.

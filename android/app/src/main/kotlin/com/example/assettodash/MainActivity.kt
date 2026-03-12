@@ -1,4 +1,4 @@
-package com.example.assettpdash
+package com.example.assettodash
 
 import io.flutter.embedding.android.FlutterActivity
 

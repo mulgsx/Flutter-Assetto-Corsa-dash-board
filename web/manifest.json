@@ -1,6 +1,6 @@
 {
-    "name": "assettpdash",
-    "short_name": "assettpdash",
+    "name": "assettodash",
+    "short_name": "assettodash",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
