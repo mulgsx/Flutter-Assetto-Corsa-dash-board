@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(curl -s https://raw.githubusercontent.com/mulgsx/Flutter-GT7-dash-board/main/lib/main.dart)",
+      "Bash(flutter pub:*)"
+    ]
+  }
+}
