@@ -48,7 +48,7 @@ A cross-platform application built with Flutter that receives real-time telemetr
 | `lastLap` | 44 | uint32 | Previous lap time (ms) |
 | `bestLap` | 48 | uint32 | Best lap time (ms) |
 
-Full packet specification: see [AC_Telemetry_Implementation_Guide_en.md](AC_Telemetry_Implementation_Guide_en.md)
+Full packet specification: see [docs/packet-structure.md](docs/packet-structure.md)
 
 ---
 

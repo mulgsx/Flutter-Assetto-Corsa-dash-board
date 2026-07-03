@@ -37,9 +37,9 @@ flutter test test/widget_test.dart  # Run specific test
 - Port: **9996** (Assetto Corsa default)
 - Default target IP: `192.168.0.0` (user-configurable, persisted via SharedPreferences)
 - Handshake: Client sends `ACHandshaker` with `operationId=0` (CONNECT), server replies with 408-byte `HandshakerResponse`, then client sends `operationId=1` (CAR_INFO) to begin streaming.
-- Packets: 328-byte `RTCarInfo` structs with little-endian floats. Key fields: `speedKmh` (offset 4), `engineRPM` (offset 12), `gear` (offset 268).
+- Packets: 328-byte `RTCarInfo` structs with little-endian floats. Key fields: `speedKmh` (offset 8), `gas` (offset 56), `brake` (offset 60), `engineRPM` (offset 68), `gear` (offset 76).
 
-See [AC_Telemetry_Implementation_Guide_jp.md](AC_Telemetry_Implementation_Guide_jp.md) for the full binary protocol reference (in Japanese).
+See [docs/assetto-corsa-protocol-reference.md](docs/assetto-corsa-protocol-reference.md) for the protocol/handshake flow and [docs/packet-structure.md](docs/packet-structure.md) for the full binary packet layouts (bilingual EN/JP).
 
 ## Platform Notes
 
